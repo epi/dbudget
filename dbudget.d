@@ -160,58 +160,58 @@ Transaction[] transactions;
 
 enum State
 {
+	InReport,
 	Idle,
 	InTransaction
 }
 
-int main(string[] args)
+struct Report
 {
-	string endDateString;
+	string name;
 	Date endDate;
 	string[] accountsToShow;
 
-	getopt(args,
-		config.noBundling,
-		config.caseInsensitive,
-		config.noPassThrough,
-		"d|end-date", &endDateString,
-		"a|account", &accountsToShow);
-
-	if (endDateString.length)
+	void reset()
 	{
-		auto m = match(endDateString, "([^-]+)-([^-]+)-([^-]+)");
-		if (!m)
-			throw new Exception("Invalid date specified");
-		endDate = Date(
-			to!uint(m.captures[1]),
-			to!uint(m.captures[2]),
-			to!uint(m.captures[3]));
-	}
-	else
-	{
+		this = Report.init;
 		endDate = cast(Date) Clock.currTime();
 	}
+}
 
-	if (args.length != 2)
+Report[string] reports;
+
+int main(string[] args)
+{
+	if (args.length < 2)
 	{
-		stderr.writefln("Usage: %s [options] input_file", args[0]);
-		stderr.write("Options are:\n" ~
-			" -d  --end-date=yyyy-mm-dd  Stop at date (default: today)\n" ~
-			" -a  --account=acc          Specify account(s) to track. May appear multiple times.\n");
+		stderr.writefln("Usage: %s input_file [report_name]", args[0]);
 		return 1;
 	}
+
+	if (args.length == 2)
+		args ~= "default";
 
 	auto f = File(args[1]);
 	State state;
 	uint n = 0;
 	Transaction t;
+	Report r;
+	r.reset();
 	foreach (line; f.byLine())
 	{
 		++n;
+		scope (failure) stderr.writeln("At line ", n);
 		if (line.length == 0)
 		{
 			if (state == state.InTransaction)
+			{
 				transactions ~= t;
+			}
+			else if (state == state.InReport)
+			{
+				reports[r.name] = r;
+				r.reset();
+			}
 			state = State.Idle;
 			continue;
 		}
@@ -222,14 +222,23 @@ int main(string[] args)
 
 		if (state == State.Idle)
 		{
-			auto m = match(line, "([^=]*)=(.*)");
-			if (m)
+			if (line.startsWith("Report"))
 			{
-				accounts[m.captures[1].strip.idup] =
-					Decimal(m.captures[2].strip.idup);
+				r.name = line[6 .. $].strip.idup;
+				if (r.name.length == 0)
+					throw new Exception("Empty report name");
+				state = State.InReport;
 				continue;
 			}
-			m = match(line, "([^-]*)-([^-]*)-([^ ]*) *(.*)");
+			if (line.startsWith("Account"))
+			{
+				string name = line[7 .. $].strip.idup;
+				if (name.length == 0)
+					throw new Exception("Empty account name");
+				accounts[name] = Decimal.Zero;
+				continue;
+			}
+			auto m = match(line, "([^-]*)-([^-]*)-([^ ]*) *(.*)");
 			if (m)
 			{
 				t.serial++;
@@ -262,32 +271,90 @@ int main(string[] args)
 				continue;
 			}
 		}
+		else if (state == State.InReport)
+		{
+			if (line.startsWith("Account"))
+			{
+				string name = line[7 .. $].strip.idup;
+				if (!(name in accounts))
+					throw new Exception(format(
+						"Unknown account `%s'", name));
+				r.accountsToShow ~= name;
+				continue;
+			}
+			else if (line.startsWith("EndDate"))
+			{
+				auto m = match(line[7 .. $].strip.idup, "([^-]+)-([^-]+)-([^-]+)");
+				if (!m)
+					throw new Exception("Invalid date specified");
+				r.endDate = Date(
+					to!uint(m.captures[1]),
+					to!uint(m.captures[2]),
+					to!uint(m.captures[3]));
+				continue;
+			}
+		}
 		throw new Exception(format(
 			"Invalid syntax at line %s:\n%s", n, line));
 	}
 	if (state == state.InTransaction)
 		transactions ~= t;
+	else if (state == state.InReport)
+		reports[r.name] = r;
 	sort(transactions);
-	foreach (acc; accountsToShow)
+	foreach (repname; args[2 .. $])
 	{
-		writeln("Account: ", acc);
+		auto rep = reports[repname];
+		writeln("Report: ", repname);
 		uint i;
-		Decimal balance = accounts[acc];
-		writefln("%5s%10s%-12s%-20s%10s%10s", "#", "", "Date", "Title", "Change", "Balance");
-		writefln("--------------------------------------------------------------------");
-		writefln("%27s%-20.20s%11s%s", "", "Initial balance", "", balance.prettyPrint());
+		writef("%5s%10s%-12s%-20s", "#", "", "Date", "Title");
+		foreach (j; 0 .. rep.accountsToShow.length)
+			writef("%10s%10s", "Change", "Balance");
+		writef("\n------------------------------------------------");
+		foreach (j; 0 .. rep.accountsToShow.length)
+			writef("--------------------");
+		writeln();
 		foreach (ref tr; transactions)
 		{
-			if (tr.date > endDate)
+			if (tr.date > rep.endDate)
 				break;
-			if (acc in tr.movements)
+			bool showThis;
+			foreach (acc; rep.accountsToShow)
 			{
-				balance = balance + tr.movements[acc];
-				writefln("%5d. [%5d] %s %-20.20s %s %s", ++i, tr.serial, tr.date, to!dstring(tr.title),
-				tr.movements[acc].prettyPrint(),
-				balance.prettyPrint());
+				if (acc in tr.movements)
+				{
+					showThis = true;
+					break;
+				}
+			}
+			if (showThis)
+			{
+				writef("%5d. [%5d] %s %-20.20s",
+					++i, tr.serial, tr.date, to!dstring(tr.title));
+				foreach (acc; rep.accountsToShow)
+				{
+					if (acc in tr.movements)
+					{
+						accounts[acc] = accounts[acc] + tr.movements[acc];
+						writef(" %s %s",
+							tr.movements[acc].prettyPrint(),
+							accounts[acc].prettyPrint());
+					}
+					else
+					{
+						writef("%20s", "");
+					}
+				}
+				writeln();
 			}
 		}
+		writef("------------------------------------------------");
+		foreach (j; 0 .. rep.accountsToShow.length)
+			writef("--------------------");
+		writef("\n%15s%-12s %-20s", "", rep.endDate, "Closing Balance");
+		foreach (acc; rep.accountsToShow)
+			writef("%11s%s", "", accounts[acc].prettyPrint());
+		writeln();
 	}
 
 	return 0;
