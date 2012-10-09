@@ -165,6 +165,13 @@ enum State
 	InTransaction
 }
 
+Date today;
+
+static this()
+{
+	today = cast(Date) Clock.currTime();
+}
+
 struct Report
 {
 	string name;
@@ -174,7 +181,7 @@ struct Report
 	void reset()
 	{
 		this = Report.init;
-		endDate = cast(Date) Clock.currTime();
+		endDate = today;
 	}
 }
 
@@ -196,6 +203,7 @@ int main(string[] args)
 	uint n = 0;
 	Transaction t;
 	Report r;
+	bool future = false;
 	r.reset();
 	foreach (line; f.byLine())
 	{
@@ -222,6 +230,11 @@ int main(string[] args)
 
 		if (state == State.Idle)
 		{
+			if (line == "Future:")
+			{
+				future = true;
+				continue;
+			}
 			if (line.startsWith("Report"))
 			{
 				r.name = line[6 .. $].strip.idup;
@@ -247,6 +260,10 @@ int main(string[] args)
 					to!uint(m.captures[2].strip),
 					to!uint(m.captures[3].strip));
 				t.title = m.captures[4].strip.idup;
+				if ((t.date > today) != future)
+					stderr.writefln(
+						"Warning: transaction `%s %s' should be in section `%s'",
+						t.date, t.title, !future ? "future" : "past");
 				t.movements.clear();
 				state = State.InTransaction;
 				continue;
