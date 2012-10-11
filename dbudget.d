@@ -154,24 +154,28 @@ int main(string[] args)
 	{
 		foreach (t; tl.transactions)
 		{
+			string desc()
+			{
+				return format("transaction (on %s) `%s'", t.date, t.title);
+			}
+
 			auto total = t.totalByCurrency();
 			auto currs = total.keys;
 			auto amounts = total.values;
 			if (total.length > 2)
 			{
-				writeln("Warning: transaction `%s': more than 2 currencies",
-					t.title);
+				writeln("Warning: %s: more than 2 currencies", desc());
 			}
 			else if (total.length == 2 && amounts[1] != Decimal.Zero)
 			{
 				writefln(
-					"Info: transaction `%s': conversion rate: 1 %s = %s %s",
-					t.title, currs[0], amounts[1] / amounts[0], currs[1]);
+					"Info: %s: conversion rate: 1 %s = %s %s",
+					desc(), currs[0], amounts[1] / amounts[0], currs[1]);
 			}
 			else if (total.length == 1 && amounts[0] != Decimal.Zero)
 			{
-				writefln("Warning: transaction `%s': off by %s %s",
-					t.title, amounts[0], currs[0]);
+				writefln("Warning: %s: off by %s %s",
+					desc(), amounts[0], currs[0]);
 			}
 		}
 	}

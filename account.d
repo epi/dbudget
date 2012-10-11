@@ -126,6 +126,11 @@ class Transaction
 		return _title;
 	}
 
+	@property Date date() const
+	{
+		return _date;
+	}
+
 	this(Date date, string title)
 	{
 		_serial = ++_serialCounter;
