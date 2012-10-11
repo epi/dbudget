@@ -296,138 +296,168 @@ class TransactionLog
 			"No such report: `%s'", name));
 	}
 
-	static TransactionLog loadFile(string fileName)
+	private class PlainTextParser
 	{
-		enum State
+		private union CurrentSection
 		{
-			InReport,
-			Idle,
-			InTransaction
+			Transaction transaction;
+			Report report;
 		}
 
+		private CurrentSection current;
+		private bool future;
+
+		private void parseIdleLine(in char[] line)
+		{
+			if (!line.strip.length)
+				return;
+			if (line.startsWith("Account"))
+			{
+				auto fields = std.array.split(line[7 .. $].strip);
+				if (fields.length == 2)
+				{
+					string name = fields[0].idup;
+					this.outer.addAccount(name, fields[1].idup);
+					return;
+				}
+			}
+			else if (line.startsWith("Report"))
+			{
+				current.report = this.outer.addReport(line[6 .. $].strip.idup);
+				parseStrippedLine = &parseReportLine;
+				return;
+			}
+			else if (line == "Future:")
+			{
+				future = true;
+				return;
+			}
+			else
+			{
+				auto m = match(line, "([^-]*)-([^-]*)-([^ ]*) *(.*)");
+				if (m)
+				{
+					auto date = Date(
+						to!uint(m.captures[1].strip),
+						to!uint(m.captures[2].strip),
+						to!uint(m.captures[3].strip));
+					auto title = m.captures[4].strip.idup;
+					if ((date > today) != future)
+						stderr.writefln(
+							"Warning: transaction `%s %s' " ~
+							"should be in section `%s'",
+							date, title, !future ? "future" : "past");
+					current.transaction =
+						this.outer.addTransaction(date, title);
+					parseStrippedLine = &parseTransactionLine;
+					return;
+				}
+			}
+			throw new Exception("Invalid syntax");
+		}
+
+		private void parseTransactionLine(in char[] line)
+		{
+			assert (current.transaction !is null);
+			if (!line.length)
+			{
+				current.transaction = null;
+				parseStrippedLine = &parseIdleLine;
+				return;
+			}
+			auto m = match(line, "([^ ]*) *-> *([^ ]*) *(.*)");
+			if (m)
+			{
+				this.outer.addMovement(current.transaction,
+					m.captures[1].strip.idup,
+					-Decimal(m.captures[3].strip.idup));
+				this.outer.addMovement(current.transaction,
+					m.captures[2].strip.idup,
+					Decimal(m.captures[3].strip.idup));
+				return;
+			}
+			m = match(line, "([^ ]*) *(.*)");
+			if (m)
+			{
+				this.outer.addMovement(current.transaction,
+					m.captures[1].strip.idup,
+					Decimal(m.captures[2].strip.idup));
+				return;
+			}
+			throw new Exception("Invalid syntax");
+		}
+
+		private void parseReportLine(in char[] line)
+		{
+			assert (current.report !is null);
+			if (!line.length)
+			{
+				current.report = null;
+				parseStrippedLine = &parseIdleLine;
+				return;
+			}
+			if (line.startsWith("Account"))
+			{
+				string name = line[7 .. $].strip.idup;
+				enforce(name in this.outer._accounts, format(
+					"Unknown account `%s' in report `%s'", name,
+					current.report._name));
+				current.report._accountsToShow ~= this.outer._accounts[name];
+				return;
+			}
+			else if (line.startsWith("StartDate"))
+			{
+				current.report._startDate = parseDate(line[9 .. $].strip);
+				return;
+			}
+			else if (line.startsWith("EndDate"))
+			{
+				current.report._endDate = parseDate(line[7 .. $].strip);
+				return;
+			}
+			else if (line.startsWith("Monthly"))
+			{
+				current.report._showMonthlyBalance =
+					parseOnOff(line[7 .. $].strip);
+				return;
+			}
+			else if (line.startsWith("Transactions"))
+			{
+				current.report._showTransactions =
+					parseOnOff(line[12 .. $].strip);
+				return;
+			}
+			throw new Exception("Invalid syntax");
+		}
+
+		private void delegate(in char[] ln) parseStrippedLine;
+
+		void parseLine(in char[] ln)
+		{
+			auto strippedLine = ln.strip;
+			if (strippedLine.startsWith("#"))
+				return;
+			parseStrippedLine(ln.strip);
+		}
+
+		this()
+		{
+			parseStrippedLine = &parseIdleLine;
+		}
+	}
+
+	static TransactionLog loadFile(string fileName)
+	{
 		auto result = new TransactionLog;
 		auto f = File(fileName);
-		State state;
 		uint n = 0;
-		bool future = false;
-
-		Transaction t;
-		Report r;
+		auto parser = result.new PlainTextParser();
 
 		foreach (line; f.byLine())
 		{
 			++n;
-			scope (failure) stderr.writeln("At line ", n);
-			if (line.length == 0)
-			{
-				if (state == state.InTransaction)
-					t = null;
-				else if (state == state.InReport)
-					r = null;
-				state = State.Idle;
-				continue;
-			}
-			else if (line.startsWith('#'))
-			{
-				continue;
-			}
-
-			if (state == State.Idle)
-			{
-				if (line.startsWith("Account"))
-				{
-					auto fields = std.array.split(line[7 .. $].strip);
-					if (fields.length == 2)
-					{
-						string name = fields[0].idup;
-						result.addAccount(name, fields[1].idup);
-						continue;
-					}
-				}
-				else if (line.startsWith("Report"))
-				{
-					r = result.addReport(line[6 .. $].strip.idup);
-					state = State.InReport;
-					continue;
-				}
-				else if (line == "Future:")
-				{
-					future = true;
-					continue;
-				}
-				else
-				{
-					auto m = match(line, "([^-]*)-([^-]*)-([^ ]*) *(.*)");
-					if (m)
-					{
-						auto date = Date(
-							to!uint(m.captures[1].strip),
-							to!uint(m.captures[2].strip),
-							to!uint(m.captures[3].strip));
-						auto title = m.captures[4].strip.idup;
-						if ((date > today) != future)
-							stderr.writefln(
-								"Warning: transaction `%s %s' " ~
-								"should be in section `%s'",
-								date, title, !future ? "future" : "past");
-						t = result.addTransaction(date, title);
-						state = State.InTransaction;
-						continue;
-					}
-				}
-			}
-			else if (state == State.InTransaction)
-			{
-				auto m = match(line, "([^ ]*) *-> *([^ ]*) *(.*)");
-				if (m)
-				{
-					result.addMovement(t, m.captures[1].strip.idup,
-						-Decimal(m.captures[3].strip.idup));
-					result.addMovement(t, m.captures[2].strip.idup,
-						Decimal(m.captures[3].strip.idup));
-					continue;
-				}
-				m = match(line, "([^ ]*) *(.*)");
-				if (m)
-				{
-					result.addMovement(t, m.captures[1].strip.idup,
-						Decimal(m.captures[2].strip.idup));
-					continue;
-				}
-			}
-			else if (state == State.InReport)
-			{
-				if (line.startsWith("Account"))
-				{
-					string name = line[7 .. $].strip.idup;
-					enforce(name in result._accounts, format(
-						"Unknown account `%s' in report `%s'", name, r._name));
-					r._accountsToShow ~= result._accounts[name];
-					continue;
-				}
-				else if (line.startsWith("StartDate"))
-				{
-					r._startDate = parseDate(line[9 .. $].strip);
-					continue;
-				}
-				else if (line.startsWith("EndDate"))
-				{
-					r._endDate = parseDate(line[7 .. $].strip);
-					continue;
-				}
-				else if (line.startsWith("Monthly"))
-				{
-					r._showMonthlyBalance = parseOnOff(line[7 .. $].strip);
-					continue;
-				}
-				else if (line.startsWith("Transactions"))
-				{
-					r._showTransactions = parseOnOff(line[12 .. $].strip);
-					continue;
-				}
-			}
-			throw new Exception(format(
-				"Invalid syntax at line %s:\n%s", n, line));
+			scope (failure) stderr.writefln("Parse error at line %s:", n);
+			parser.parseLine(line);
 		}
 		result._transactions.sort();
 
