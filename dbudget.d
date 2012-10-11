@@ -134,7 +134,14 @@ struct Decimal
 	}
 }
 
-Decimal[string] accounts;
+struct Account
+{
+	string name;
+	Decimal balance;
+	string currency;
+}
+
+Account[string] accounts;
 
 struct Transaction
 {
@@ -198,6 +205,7 @@ int main(string[] args)
 	if (args.length == 2)
 		args ~= "default";
 
+	// parse...
 	auto f = File(args[1]);
 	State state;
 	uint n = 0;
@@ -245,10 +253,13 @@ int main(string[] args)
 			}
 			if (line.startsWith("Account"))
 			{
-				string name = line[7 .. $].strip.idup;
+				auto fields = std.array.split(line[7 .. $].strip);
+				string name = fields[0].idup;
 				if (name.length == 0)
 					throw new Exception("Empty account name");
-				accounts[name] = Decimal.Zero;
+				accounts[name] = Account(name, Decimal.Zero,
+					fields.length > 0 ? fields[1].idup : "EUR");
+				writeln(accounts[name]);
 				continue;
 			}
 			auto m = match(line, "([^-]*)-([^-]*)-([^ ]*) *(.*)");
@@ -318,13 +329,20 @@ int main(string[] args)
 		transactions ~= t;
 	else if (state == state.InReport)
 		reports[r.name] = r;
+
+	// ... and print!
 	sort(transactions);
+	future = false;
 	foreach (repname; args[2 .. $])
 	{
 		auto rep = reports[repname];
 		writeln("Report: ", repname);
 		uint i;
-		writef("%5s%10s%-12s%-20s", "#", "", "Date", "Title");
+
+		writef("%47s", "");
+		foreach (acc; rep.accountsToShow)
+			write(" ", center(acc[0 .. min(19, acc.length)], 19, "="));
+		writef("\n%5s%10s%-12s%-20s", "#", "", "Date", "Title");
 		foreach (j; 0 .. rep.accountsToShow.length)
 			writef("%10s%10s", "Change", "Balance");
 		writef("\n------------------------------------------------");
@@ -333,6 +351,14 @@ int main(string[] args)
 		writeln();
 		foreach (ref tr; transactions)
 		{
+			if (tr.date > today && !future)
+			{
+				writef("------------------------------------------------");
+				foreach (j; 0 .. rep.accountsToShow.length)
+					writef("--------------------");
+				writeln();
+				future = true;
+			}
 			if (tr.date > rep.endDate)
 				break;
 			bool showThis;
@@ -352,10 +378,11 @@ int main(string[] args)
 				{
 					if (acc in tr.movements)
 					{
-						accounts[acc] = accounts[acc] + tr.movements[acc];
+						accounts[acc].balance =
+							accounts[acc].balance + tr.movements[acc];
 						writef(" %s %s",
 							tr.movements[acc].prettyPrint(),
-							accounts[acc].prettyPrint());
+							accounts[acc].balance.prettyPrint());
 					}
 					else
 					{
@@ -370,9 +397,13 @@ int main(string[] args)
 			writef("--------------------");
 		writef("\n%15s%-12s %-20s", "", rep.endDate, "Closing Balance");
 		foreach (acc; rep.accountsToShow)
-			writef("%11s%s", "", accounts[acc].prettyPrint());
+			writef("%11s%s", "", accounts[acc].balance.prettyPrint());
 		writeln();
 	}
+
+	foreach (acc; accounts)
+		writefln("%-30s %s %s", to!dstring(acc.name), acc.balance.prettyPrint(),
+			acc.currency);
 
 	return 0;
 }
