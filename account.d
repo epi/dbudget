@@ -89,6 +89,25 @@ class Transaction
 		_movements ~= Movement(account, amount);
 	}
 
+	Decimal[string] totalByCurrency() const
+	{
+		Decimal[string] result;
+		foreach (mvmt; _movements)
+		{
+			auto cur = mvmt.account._currency;
+			if (cur !in result)
+				result[cur] = mvmt.amount;
+			else
+				result[cur] = result[cur] + mvmt.amount;
+		}
+		return result;
+	}
+
+	@property string title() const
+	{
+		return _title;
+	}
+
 	this(Date date, string title)
 	{
 		_serial = ++_serialCounter;
@@ -254,6 +273,11 @@ class TransactionLog
 	private Account[string] _accounts;
 	private Transaction[] _transactions;
 	private Report[string] _reports;
+
+	@property const(Transaction[]) transactions() const
+	{
+		return _transactions;
+	}
 
 	Report addReport(string name)
 	{
