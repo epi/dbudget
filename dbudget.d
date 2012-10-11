@@ -1,8 +1,12 @@
 /*
 Written in the D Programming Language
 
-dbudget - accounting and budget planning application for console geeks
+dbudget.d - console interface for dbudget
+
 Copyright (C) 2012 Adrian Matoga
+
+This file is part of dbudget - accounting and budget planning
+application for console geeks. See https://github.com/epi/dbudget
 
 dbudget is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -25,174 +29,114 @@ import std.datetime;
 import std.conv;
 import std.math;
 import std.getopt;
+import std.range;
 import std.algorithm;
+import decimal;
+import account;
 
-struct Decimal
+class DefaultReportFormatter : ReportFormatter
 {
-	long _payload;
-
-	this(string s)
+	private enum LastPrinted
 	{
-		bool neg;
-		if (s.startsWith('+'))
-			s = s[1 .. $];
-		else if (s.startsWith('-'))
-		{
-			neg = true;
-			s = s[1 .. $];
-		}
-
-		long m = 1000000;
-		long div = 1;
-		while (s.length)
-		{
-			if (s[0] >= '0' && s[0] <= '9')
-			{
-				_payload = _payload * 10 + s[0] - '0';
-				m /= div;
-			}
-			else if (s[0] == '.')
-			{
-				if (div > 1)
-					throw new Exception("Double dot");
-				div = 10;
-			}
-			else
-				throw new Exception(format("Invalid character '%s'", s[0]));
-			s = s[1 .. $];
-		}
-		if (m < 1)
-			throw new Exception("Too many fractional digits");
-		_payload *= m;
-		if (neg)
-			_payload = -_payload;
+		None,
+		Transaction,
+		Balance
 	}
 
-	unittest
+	private LastPrinted _lastPrinted;
+	private size_t _numAccounts;
+
+	override void startReport(string name, size_t numAccounts)
 	{
-		static assert (Decimal("0")._payload == 0);
-		static assert (Decimal("15")._payload == 15_000000);
-		static assert (Decimal("-15")._payload == -15_000000);
-		static assert (Decimal("-15.123456")._payload == -15_123456);
+		writeln("Report: ", name);
+		_numAccounts = numAccounts;
 	}
 
-	enum Zero = Decimal(0);
-	enum One = Decimal(1_000000);
-
-	Decimal opBinary(string op)(Decimal rhs) if (op == "+" || op == "-" || op == "+=" || op == "-=")
+	override void startHeader()
 	{
-		Decimal result;
-		result._payload = mixin("this._payload " ~ op ~ " rhs._payload");
-		return result;
+		writef("%47s", "");
 	}
 
-	Decimal opUnary(string op)() if (op == "-")
+	override void writeAccountHeader(string name)
 	{
-		return Decimal.Zero - this;
+		auto x = to!dstring(name);
+		write(" ", center(x[0 .. min(18, x.length)], 18));
 	}
 
-	bool opEquals(ref const Decimal rhs)
+	override void finalizeHeader()
 	{
-		return this._payload == rhs._payload;
+		writef("\n%5s%10s%-12s%-20s", "#", "", "Date", "Title");
+		foreach (j; 0 .. _numAccounts)
+			writef(" %9s%9s", "Change", "Balance");
+		writeln();
 	}
 
-	int opCmp(ref const Decimal rhs) const
+	override void startTransaction(uint n, uint serial, Date date,
+		string title)
 	{
-		auto res = this._payload - rhs._payload;
-		if (res < 0)
-			return -1;
-		else if (res > 0)
-			return 1;
-		else
-			return 0;
+		if (_lastPrinted != LastPrinted.Transaction)
+			printBar();
+		writef("%5d. [%5d] %s %-20.20s",
+			n, serial, date, to!dstring(title));
+		_lastPrinted = LastPrinted.Transaction;
 	}
 
-	unittest
+	override void printTransactionComp(Decimal credit, Decimal balance,
+		string currency)
 	{
-		assert (-Decimal("-15") == Decimal("15"));
-		static assert ((Decimal("31.337") + Decimal("-1.336"))._payload == 30_001000);
-		static assert ((Decimal("30.007") - Decimal("-1.3301"))._payload == 31_337100);
-		assert (Decimal("41.447") > Decimal("31.337"));
-		assert (Decimal("31.337") + Decimal("-1.336") == Decimal("30.001"));
+		writef(" %s%s", credit.prettyPrint(), balance.prettyPrint());
 	}
 
-	string toString()
+	override void printEmptyTransactionComp()
 	{
-		return format("%d.%02d", _payload / 1_000000, abs(_payload % 1_000000 / 10000));
+		writef("%19s", "");
 	}
 
-	string prettyPrint()
+	override void finalizeTransaction()
 	{
-		if (_payload >= 0)
-			return format("%6d.%02d",
-				_payload / 1_000000,
-				abs(_payload % 1_000000 / 10000));
-		else
-			return format("\x1b[31;1m%6d.%02d\x1b[0m",
-				_payload / 1_000000,
-				abs(_payload % 1_000000 / 10000));
+		writeln();
+	}
+
+	override void startBalance(Date date, string title)
+	{
+		if (_lastPrinted != LastPrinted.Balance)
+			printBar();
+		writef("%15s%-12s %-20.20s", "", date, to!dstring(title));
+		_lastPrinted = LastPrinted.Balance;
+	}
+
+	override void printBalanceComp(Decimal balance, string currency)
+	{
+		writef("%10s%s", "", balance.prettyPrint());
+	}
+
+	override void finalizeBalance()
+	{
+		writeln();
+	}
+
+	override void startFuture()
+	{
+//		printDoubleBar();
+		printBar();
+	}
+
+	override void finalizeReport()
+	{
+		printBar();
+		writeln("Generated on ", Clock.currTime());
+	}
+
+	void printBar()
+	{
+		writeln(std.range.repeat('-', 48 + _numAccounts * 19));
+	}
+
+	void printDoubleBar()
+	{
+		writeln(std.range.repeat('=', 48 + _numAccounts * 19));
 	}
 }
-
-struct Account
-{
-	string name;
-	Decimal balance;
-	string currency;
-}
-
-Account[string] accounts;
-
-struct Transaction
-{
-	uint serial;
-	Date date;
-	string title;
-	Decimal[string] movements;
-	
-	bool opEquals(ref const Transaction rhs)
-	{
-		return false;
-	}
-
-	int opCmp(ref const Transaction rhs) const
-	{
-		if (this.date == rhs.date)
-			return this.serial - rhs.serial;
-		return this.date.opCmp(rhs.date);
-	}
-}
-
-Transaction[] transactions;
-
-enum State
-{
-	InReport,
-	Idle,
-	InTransaction
-}
-
-Date today;
-
-static this()
-{
-	today = cast(Date) Clock.currTime();
-}
-
-struct Report
-{
-	string name;
-	Date endDate;
-	string[] accountsToShow;
-
-	void reset()
-	{
-		this = Report.init;
-		endDate = today;
-	}
-}
-
-Report[string] reports;
 
 int main(string[] args)
 {
@@ -205,132 +149,12 @@ int main(string[] args)
 	if (args.length == 2)
 		args ~= "default";
 
-	// parse...
-	auto f = File(args[1]);
-	State state;
-	uint n = 0;
-	Transaction t;
-	Report r;
-	bool future = false;
-	r.reset();
-	foreach (line; f.byLine())
-	{
-		++n;
-		scope (failure) stderr.writeln("At line ", n);
-		if (line.length == 0)
-		{
-			if (state == state.InTransaction)
-			{
-				transactions ~= t;
-			}
-			else if (state == state.InReport)
-			{
-				reports[r.name] = r;
-				r.reset();
-			}
-			state = State.Idle;
-			continue;
-		}
-		else if (line.startsWith('#'))
-		{
-			continue;
-		}
+	auto tl = TransactionLog.loadFile(args[1]);
+	auto rf = new DefaultReportFormatter();
+	
+	tl.getReport(args[2]).print(rf);
 
-		if (state == State.Idle)
-		{
-			if (line == "Future:")
-			{
-				future = true;
-				continue;
-			}
-			if (line.startsWith("Report"))
-			{
-				r.name = line[6 .. $].strip.idup;
-				if (r.name.length == 0)
-					throw new Exception("Empty report name");
-				state = State.InReport;
-				continue;
-			}
-			if (line.startsWith("Account"))
-			{
-				auto fields = std.array.split(line[7 .. $].strip);
-				string name = fields[0].idup;
-				if (name.length == 0)
-					throw new Exception("Empty account name");
-				accounts[name] = Account(name, Decimal.Zero,
-					fields.length > 0 ? fields[1].idup : "EUR");
-				writeln(accounts[name]);
-				continue;
-			}
-			auto m = match(line, "([^-]*)-([^-]*)-([^ ]*) *(.*)");
-			if (m)
-			{
-				t.serial++;
-				t.date = Date(
-					to!uint(m.captures[1].strip),
-					to!uint(m.captures[2].strip),
-					to!uint(m.captures[3].strip));
-				t.title = m.captures[4].strip.idup;
-				if ((t.date > today) != future)
-					stderr.writefln(
-						"Warning: transaction `%s %s' should be in section `%s'",
-						t.date, t.title, !future ? "future" : "past");
-				t.movements.clear();
-				state = State.InTransaction;
-				continue;
-			}
-		}
-		else if (state == State.InTransaction)
-		{
-			auto m = match(line, "([^ ]*) *-> *([^ ]*) *(.*)");
-			if (m)
-			{
-				t.movements[m.captures[1].strip.idup] =
-					-Decimal(m.captures[3].strip.idup);
-				t.movements[m.captures[2].strip.idup] =
-					Decimal(m.captures[3].strip.idup);
-				continue;
-			}
-			m = match(line, "([^ ]*) *(.*)");
-			if (m)
-			{
-				t.movements[m.captures[1].strip.idup] =
-					Decimal(m.captures[2].strip.idup);
-				continue;
-			}
-		}
-		else if (state == State.InReport)
-		{
-			if (line.startsWith("Account"))
-			{
-				string name = line[7 .. $].strip.idup;
-				if (!(name in accounts))
-					throw new Exception(format(
-						"Unknown account `%s'", name));
-				r.accountsToShow ~= name;
-				continue;
-			}
-			else if (line.startsWith("EndDate"))
-			{
-				auto m = match(line[7 .. $].strip.idup, "([^-]+)-([^-]+)-([^-]+)");
-				if (!m)
-					throw new Exception("Invalid date specified");
-				r.endDate = Date(
-					to!uint(m.captures[1]),
-					to!uint(m.captures[2]),
-					to!uint(m.captures[3]));
-				continue;
-			}
-		}
-		throw new Exception(format(
-			"Invalid syntax at line %s:\n%s", n, line));
-	}
-	if (state == state.InTransaction)
-		transactions ~= t;
-	else if (state == state.InReport)
-		reports[r.name] = r;
-
-	// ... and print!
+/*	// ... and print!
 	sort(transactions);
 	future = false;
 	foreach (repname; args[2 .. $])
@@ -341,7 +165,7 @@ int main(string[] args)
 
 		writef("%47s", "");
 		foreach (acc; rep.accountsToShow)
-			write(" ", center(acc[0 .. min(19, acc.length)], 19, "="));
+			write(" ", center(acc[0 .. min(19, acc.length)], 19));
 		writef("\n%5s%10s%-12s%-20s", "#", "", "Date", "Title");
 		foreach (j; 0 .. rep.accountsToShow.length)
 			writef("%10s%10s", "Change", "Balance");
@@ -403,7 +227,7 @@ int main(string[] args)
 
 	foreach (acc; accounts)
 		writefln("%-30s %s %s", to!dstring(acc.name), acc.balance.prettyPrint(),
-			acc.currency);
+			acc.currency);*/
 
 	return 0;
 }
