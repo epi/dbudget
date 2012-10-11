@@ -84,6 +84,13 @@ struct Decimal
 		return result;
 	}
 
+	Decimal opBinary(string op)(Decimal rhs) if (op == "/")
+	{
+		Decimal result;
+		result._payload = this._payload * 1_000000 / rhs._payload;
+		return result;
+	}
+
 	Decimal opUnary(string op)() if (op == "-")
 	{
 		return Decimal.Zero - this;
