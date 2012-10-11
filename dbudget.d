@@ -117,7 +117,6 @@ class DefaultReportFormatter : ReportFormatter
 
 	override void startFuture()
 	{
-		printBar();
 	}
 
 	override void finalizeReport()

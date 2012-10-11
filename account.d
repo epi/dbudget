@@ -225,6 +225,7 @@ class Report
 			}
 			if (tr._date > today && !future)
 			{
+				printBalance(today, "Current balance");
 				fmt.startFuture();
 				future = true;
 			}
