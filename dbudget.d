@@ -117,7 +117,6 @@ class DefaultReportFormatter : ReportFormatter
 
 	override void startFuture()
 	{
-//		printDoubleBar();
 		printBar();
 	}
 
@@ -130,11 +129,6 @@ class DefaultReportFormatter : ReportFormatter
 	void printBar()
 	{
 		writeln(std.range.repeat('-', 48 + _numAccounts * 19));
-	}
-
-	void printDoubleBar()
-	{
-		writeln(std.range.repeat('=', 48 + _numAccounts * 19));
 	}
 }
 
@@ -153,81 +147,6 @@ int main(string[] args)
 	auto rf = new DefaultReportFormatter();
 	
 	tl.getReport(args[2]).print(rf);
-
-/*	// ... and print!
-	sort(transactions);
-	future = false;
-	foreach (repname; args[2 .. $])
-	{
-		auto rep = reports[repname];
-		writeln("Report: ", repname);
-		uint i;
-
-		writef("%47s", "");
-		foreach (acc; rep.accountsToShow)
-			write(" ", center(acc[0 .. min(19, acc.length)], 19));
-		writef("\n%5s%10s%-12s%-20s", "#", "", "Date", "Title");
-		foreach (j; 0 .. rep.accountsToShow.length)
-			writef("%10s%10s", "Change", "Balance");
-		writef("\n------------------------------------------------");
-		foreach (j; 0 .. rep.accountsToShow.length)
-			writef("--------------------");
-		writeln();
-		foreach (ref tr; transactions)
-		{
-			if (tr.date > today && !future)
-			{
-				writef("------------------------------------------------");
-				foreach (j; 0 .. rep.accountsToShow.length)
-					writef("--------------------");
-				writeln();
-				future = true;
-			}
-			if (tr.date > rep.endDate)
-				break;
-			bool showThis;
-			foreach (acc; rep.accountsToShow)
-			{
-				if (acc in tr.movements)
-				{
-					showThis = true;
-					break;
-				}
-			}
-			if (showThis)
-			{
-				writef("%5d. [%5d] %s %-20.20s",
-					++i, tr.serial, tr.date, to!dstring(tr.title));
-				foreach (acc; rep.accountsToShow)
-				{
-					if (acc in tr.movements)
-					{
-						accounts[acc].balance =
-							accounts[acc].balance + tr.movements[acc];
-						writef(" %s %s",
-							tr.movements[acc].prettyPrint(),
-							accounts[acc].balance.prettyPrint());
-					}
-					else
-					{
-						writef("%20s", "");
-					}
-				}
-				writeln();
-			}
-		}
-		writef("------------------------------------------------");
-		foreach (j; 0 .. rep.accountsToShow.length)
-			writef("--------------------");
-		writef("\n%15s%-12s %-20s", "", rep.endDate, "Closing Balance");
-		foreach (acc; rep.accountsToShow)
-			writef("%11s%s", "", accounts[acc].balance.prettyPrint());
-		writeln();
-	}
-
-	foreach (acc; accounts)
-		writefln("%-30s %s %s", to!dstring(acc.name), acc.balance.prettyPrint(),
-			acc.currency);*/
 
 	return 0;
 }
