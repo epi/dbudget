@@ -103,6 +103,24 @@ class Transaction
 		return result;
 	}
 
+	Decimal[string] equityIncreaseByCurrency() const
+	{
+		Decimal[string] result;
+		foreach (mvmt; _movements)
+		{
+			if (mvmt.account._name.startsWith("Assets.")
+			 || mvmt.account._name.startsWith("Liabilities."))
+			{
+				auto cur = mvmt.account._currency;
+				if (cur !in result)
+					result[cur] = mvmt.amount;
+				else
+					result[cur] = result[cur] + mvmt.amount;
+			}
+		}
+		return result;
+	}
+
 	@property string title() const
 	{
 		return _title;
@@ -154,6 +172,7 @@ class Report
 	private Account[] _accountsToShow;
 	private bool _showMonthlyBalance = false;
 	private bool _showTransactions = true;
+	private string[] _equities;
 
 	this(TransactionLog tl, string name)
 	{
@@ -164,11 +183,17 @@ class Report
 
 	void print(ReportFormatter fmt)
 	{
-		fmt.startReport(_name, _accountsToShow.length);
+		Decimal[string] equity;
+		foreach (curr; _equities)
+			equity[curr] = Decimal.Zero;
+
+		fmt.startReport(_name, _accountsToShow.length + _equities.length);
 
 		fmt.startHeader();
 		foreach (acc; _accountsToShow)
 			fmt.writeAccountHeader(acc._name);
+		foreach (curr; _equities)
+			fmt.writeAccountHeader("Equity " ~ curr);
 		fmt.finalizeHeader();
 
 		bool afterStartDate;
@@ -176,23 +201,27 @@ class Report
 		uint n;
 		Date prevDate;
 
+		void printBalance(Date date, string title)
+		{
+			fmt.startBalance(date, title);
+			foreach (acc; _accountsToShow)
+				fmt.printBalanceComp(acc._balance, acc._currency);
+			foreach (curr; _equities)
+				fmt.printBalanceComp(equity[curr], curr);
+			fmt.finalizeBalance();
+		}
+
 		foreach (tr; _transactionLog._transactions)
 		{
 			if (tr._date >= _startDate && !afterStartDate)
 			{
-				fmt.startBalance(_startDate, "Initial balance");
-				foreach (acc; _accountsToShow)
-					fmt.printBalanceComp(acc._balance, acc._currency);
-				fmt.finalizeBalance();
+				printBalance(_startDate, "Initial balance");
 				afterStartDate = true;
 			}
 			if (tr._date.month != prevDate.month && _showMonthlyBalance)
 			{
-				fmt.startBalance(Date(tr._date.year, tr._date.month, 1),
+				printBalance(Date(tr._date.year, tr._date.month, 1),
 					"Monthly balance");
-				foreach (acc; _accountsToShow)
-					fmt.printBalanceComp(acc._balance, acc._currency);
-				fmt.finalizeBalance();
 			}
 			if (tr._date > today && !future)
 			{
@@ -201,7 +230,8 @@ class Report
 			}
 			if (tr._date > _endDate)
 				break;
-			bool showThis;
+
+			bool showThis = _equities.length > 0;
 			Transaction.Movement[] mvmts;
 			mvmts.length = _accountsToShow.length;
 			foreach (i, acc; _accountsToShow)
@@ -234,15 +264,31 @@ class Report
 							fmt.printEmptyTransactionComp();
 					}
 				}
+				if (_equities.length)
+				{
+					auto total = tr.equityIncreaseByCurrency();
+					foreach (curr; _equities)
+					{
+						if (curr in equity && curr in total)
+						{
+							equity[curr] = equity[curr] + total[curr];
+							if (_showTransactions && afterStartDate)
+								fmt.printTransactionComp(
+									total[curr], equity[curr], curr);
+						}
+						else
+						{
+							if (_showTransactions && afterStartDate)
+								fmt.printEmptyTransactionComp();
+						}
+					}
+				}
 				if (_showTransactions && afterStartDate)
 					fmt.finalizeTransaction();
 			}
 			prevDate = tr._date;
 		}
-		fmt.startBalance(_endDate, "Closing balance");
-		foreach (acc; _accountsToShow)
-			fmt.printBalanceComp(acc._balance, acc._currency);
-		fmt.finalizeBalance();
+		printBalance(_endDate, "Closing balance");
 
 		fmt.finalizeReport();
 	}
@@ -459,6 +505,11 @@ class TransactionLog
 			{
 				current.report._showTransactions =
 					parseOnOff(line[12 .. $].strip);
+				return;
+			}
+			else if (line.startsWith("Equity"))
+			{
+				current.report._equities ~= line[6 .. $].strip.idup;
 				return;
 			}
 			throw new Exception("Invalid syntax");
