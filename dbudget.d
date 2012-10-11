@@ -134,6 +134,13 @@ class DefaultReportFormatter : ReportFormatter
 
 int main(string[] args)
 {
+	bool verify;
+
+	getopt(args,
+		config.caseSensitive,
+		config.noPassThrough,
+		"verify", &verify);
+
 	if (args.length < 2)
 	{
 		stderr.writefln("Usage: %s input_file [report_name]", args[0]);
@@ -144,8 +151,33 @@ int main(string[] args)
 		args ~= "default";
 
 	auto tl = TransactionLog.loadFile(args[1]);
+	if (verify)
+	{
+		foreach (t; tl.transactions)
+		{
+			auto total = t.totalByCurrency();
+			auto currs = total.keys;
+			auto amounts = total.values;
+			if (total.length > 2)
+			{
+				writeln("Warning: transaction `%s': more than 2 currencies",
+					t.title);
+			}
+			else if (total.length == 2 && amounts[1] != Decimal.Zero)
+			{
+				writefln(
+					"Info: transaction `%s': conversion rate: 1 %s = %s %s",
+					t.title, currs[0], amounts[1] / amounts[0], currs[1]);
+			}
+			else if (total.length == 1 && amounts[0] != Decimal.Zero)
+			{
+				writefln("Warning: transaction `%s': off by %s %s",
+					t.title, amounts[0], currs[0]);
+			}
+		}
+	}
+
 	auto rf = new DefaultReportFormatter();
-	
 	tl.getReport(args[2]).print(rf);
 
 	return 0;
