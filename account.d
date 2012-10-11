@@ -298,6 +298,8 @@ class TransactionLog
 
 	private class PlainTextParser
 	{
+		void delegate(in char[] name) includeFile;
+
 		private union CurrentSection
 		{
 			Transaction transaction;
@@ -306,6 +308,7 @@ class TransactionLog
 
 		private CurrentSection current;
 		private bool future;
+		private void delegate(in char[] line) parseStrippedLine;
 
 		private void parseIdleLine(in char[] line)
 		{
@@ -320,6 +323,13 @@ class TransactionLog
 					this.outer.addAccount(name, fields[1].idup);
 					return;
 				}
+			}
+			else if (line.startsWith("Include"))
+			{
+				assert (includeFile !is null,
+					"Fatal error: no include file delegate");
+				includeFile(line[7 .. $].strip.idup);
+				return;
 			}
 			else if (line.startsWith("Report"))
 			{
@@ -430,14 +440,12 @@ class TransactionLog
 			throw new Exception("Invalid syntax");
 		}
 
-		private void delegate(in char[] ln) parseStrippedLine;
-
-		void parseLine(in char[] ln)
+		void parseLine(in char[] line)
 		{
-			auto strippedLine = ln.strip;
+			auto strippedLine = line.strip;
 			if (strippedLine.startsWith("#"))
 				return;
-			parseStrippedLine(ln.strip);
+			parseStrippedLine(line.strip);
 		}
 
 		this()
@@ -448,17 +456,41 @@ class TransactionLog
 
 	static TransactionLog loadFile(string fileName)
 	{
-		auto result = new TransactionLog;
-		auto f = File(fileName);
-		uint n = 0;
-		auto parser = result.new PlainTextParser();
-
-		foreach (line; f.byLine())
+		static struct FileRange
 		{
-			++n;
-			scope (failure) stderr.writefln("Parse error at line %s:", n);
-			parser.parseLine(line);
+			string name;
+			typeof(File("").byLine()) range;
+			size_t lineNo;
 		}
+
+		auto result = new TransactionLog;
+		FileRange[] fileStack;
+		auto parser = result.new PlainTextParser();
+		size_t level;
+		parser.includeFile = (in char[] fn)
+		{
+			string name = fn.idup;
+			fileStack ~= FileRange(name, File(name).byLine(), 0);
+		};
+
+		parser.includeFile(fileName);
+		while (fileStack.length)
+		{
+			while (!fileStack[level].range.empty)
+			{
+				++fileStack[level].lineNo;
+				scope (failure) stderr.writefln(
+					"Parse error in file `%s' line %s:",
+					fileStack[level].name, fileStack[level].lineNo);
+				auto line = fileStack[level].range.front;
+				parser.parseLine(line);
+				fileStack[level].range.popFront();
+				level = fileStack.length - 1;
+			}
+			fileStack.length = fileStack.length - 1;
+			level = fileStack.length - 1;
+		}
+
 		result._transactions.sort();
 
 		return result;
