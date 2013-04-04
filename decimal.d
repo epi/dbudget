@@ -29,6 +29,8 @@ struct Decimal
 {
 	long _payload;
 
+	this(long payload) { _payload = payload; }
+
 	this(string s)
 	{
 		bool neg;
@@ -74,9 +76,6 @@ struct Decimal
 		static assert (Decimal("-15.123456")._payload == -15_123456);
 	}
 
-	enum Zero = Decimal(0);
-	enum One = Decimal(1_000000);
-
 	Decimal opBinary(string op)(Decimal rhs) if (op == "+" || op == "-" || op == "+=" || op == "-=")
 	{
 		Decimal result;
@@ -93,15 +92,15 @@ struct Decimal
 
 	Decimal opUnary(string op)() if (op == "-")
 	{
-		return Decimal.Zero - this;
+		return DecimalZero - this;
 	}
 
-	bool opEquals(ref const Decimal rhs)
+	bool opEquals(const Decimal rhs)
 	{
 		return this._payload == rhs._payload;
 	}
 
-	int opCmp(ref const Decimal rhs) const
+	int opCmp(const Decimal rhs) const
 	{
 		auto res = this._payload - rhs._payload;
 		if (res < 0)
@@ -137,5 +136,10 @@ struct Decimal
 				_payload / 1_000000,
 				abs(_payload % 1_000000 / 10000));
 	}
+
+	@property static Decimal Zero() { return DecimalZero; }
+	@property static Decimal One() { return DecimalOne; }
 }
 
+enum DecimalZero = Decimal(0);
+enum DecimalOne = Decimal(1_000000);
