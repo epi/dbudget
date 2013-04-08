@@ -46,6 +46,15 @@ class DefaultReportFormatter : ReportFormatter
 	private LastPrinted _lastPrinted;
 	private size_t _numAccounts;
 
+	void print(Decimal d)
+	{
+		if (d < 0)
+			write("\x1b[31;1m");
+		scope(exit) if (d < 0)
+			write("\x1b[0m");
+		writef("%9.2d", d);
+	}
+
 	override void startReport(string name, size_t numAccounts)
 	{
 		writeln("Report: ", name);
@@ -84,7 +93,9 @@ class DefaultReportFormatter : ReportFormatter
 	override void printTransactionComp(Decimal credit, Decimal balance,
 		string currency)
 	{
-		writef(" %s%s", credit.prettyPrint(), balance.prettyPrint());
+		write(" ");
+		print(credit);
+		print(balance);
 	}
 
 	override void printEmptyTransactionComp()
@@ -107,7 +118,8 @@ class DefaultReportFormatter : ReportFormatter
 
 	override void printBalanceComp(Decimal balance, string currency)
 	{
-		writef("%10s%s", "", balance.prettyPrint());
+		writef("%10s", "");
+		print(balance);
 	}
 
 	override void finalizeBalance()

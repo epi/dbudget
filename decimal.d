@@ -22,8 +22,10 @@ You should have received a copy of the GNU General Public License
 along with dbudget.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-import std.string;
+import std.exception;
+import std.format;
 import std.math;
+import std.string;
 
 struct Decimal
 {
@@ -103,12 +105,17 @@ struct Decimal
 	int opCmp(const Decimal rhs) const
 	{
 		auto res = this._payload - rhs._payload;
-		if (res < 0)
-			return -1;
-		else if (res > 0)
-			return 1;
-		else
-			return 0;
+		return res < 0 ? -1 :
+		       res > 0 ? 1 :
+		       0;
+	}
+
+	int opCmp(int rhs) const
+	{
+		auto res = this._payload - rhs * 1_000000L;
+		return res < 0 ? -1 :
+		       res > 0 ? 1 :
+		       0;
 	}
 
 	unittest
@@ -120,21 +127,85 @@ struct Decimal
 		assert (Decimal("31.337") + Decimal("-1.336") == Decimal("30.001"));
 	}
 
-	string toString()
+	void toString(scope void delegate(const(char)[]) sink,
+		FormatSpec!char fmt) const
 	{
-		return format("%d.%02d", _payload / 1_000000, abs(_payload % 1_000000 / 10000));
+		long val = _payload;
+		switch (fmt.spec)
+		{
+		case 's': case 'f': case 'F':
+			fmt.spec = 'd';
+			goto case 'd';
+		case 'd':
+			char[] result;
+			string prefix;
+			if (fmt.precision == fmt.UNSPECIFIED)
+				fmt.precision = 2;
+			else if (fmt.precision > 6)
+				fmt.precision = 6;
+			if (val < 0)
+			{
+				prefix = "-";
+				val = -val;
+			}
+			else if (fmt.flPlus)
+				prefix = "+";
+			val /= [1000000, 100000, 10000, 1000, 100, 10, 1][fmt.precision];
+			char[] digits = void;
+			{
+				char[64] buf;
+				auto i = buf.length;
+				if (fmt.precision)
+				{
+					do
+					{
+						buf[--i] = '0' + val % 10;
+						val /= 10;
+					}
+					while (--fmt.precision);
+					buf[--i] = '.';
+				}
+				do
+				{
+					buf[--i] = '0' + val % 10;
+					val /= 10;
+				}
+				while (val);
+				digits = buf[i .. $];
+			}
+			ptrdiff_t paddingSize = fmt.width - digits.length - prefix.length;
+			if (fmt.flZero)
+			{
+				if (prefix.length)
+					sink(prefix);
+				while (paddingSize-- > 0)
+					sink("0");
+			}
+			else
+			{
+				while (paddingSize-- > 0)
+					sink(" ");
+				if (prefix.length)
+					sink(prefix);
+			}
+			sink(digits);
+			break;
+		default:
+			throw new Exception("Unknown format specifier");
+		}
 	}
 
-	string prettyPrint()
+	unittest
 	{
-		if (_payload >= 0)
-			return format("%6d.%02d",
-				_payload / 1_000000,
-				abs(_payload % 1_000000 / 10000));
-		else
-			return format("\x1b[31;1m%6d.%02d\x1b[0m",
-				_payload / 1_000000,
-				abs(_payload % 1_000000 / 10000));
+		auto d1 = Decimal("-0.15");
+		assertThrown(format("%x", d1));
+		assert (format("%s", d1) == "-0.15");
+		assert (format("%s", -d1) == "0.15");
+		assert (format("%1.1d", -d1) == "0.1");
+		assert (format("%05.1d", d1) == "-00.1");
+		assert (format("%05.1d", -d1) == "000.1");
+		assert (format("%+05.1d", -d1) == "+00.1");
+		assert (format("%+5.1d", d1) == " -0.1");
 	}
 
 	@property static Decimal Zero() { return DecimalZero; }
